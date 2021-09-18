@@ -1,2 +1,2 @@
 # location-services-demo
-Playing around with location services
+Playing around with location services.
