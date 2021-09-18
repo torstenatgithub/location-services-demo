@@ -8,6 +8,8 @@ from geocode import *
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# ?address_line=willy-brandt-str.1&municipality_name=berlin&state_code=&post_code=10557&country_code=DEU
+
 def lambda_handler(event, context):
 
     try:    
@@ -20,8 +22,28 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.exception (e)
-        response ={
+        response = {
             "Exception": str(e)
         }
+    
+    if "Longitude" in response:
+        lambda_response = {
+            "isBase64Encoded": False,
+            "statusCode": 200,
+            "headers": {},
+            "multiValueHeaders": {},
+            "body": response
+        }
+    else:
+        lambda_response = {
+            "isBase64Encoded": False,
+            "statusCode": 200,
+            "headers": {},
+            "multiValueHeaders": {},
+            "body": response
+            #"body": {
+            #    "message": "Invalid input or error while geocoding address."
+            #}
+        }
 
-    return response
+    return lambda_response

@@ -1,5 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
+
 Description: Geocode address using Amazon Location Service
+
 Mappings:
   RegionBucketMap:
     us-east-1:
@@ -36,6 +38,7 @@ Mappings:
       S3Bucket: tk-location-services-lambda.ap-southeast-1
     ap-southeast-2:
       S3Bucket: tk-location-services-lambda.ap-southeast-2
+
 Resources:
   PlaceIndex:
     Type: AWS::Location::PlaceIndex
@@ -47,6 +50,7 @@ Resources:
       IndexName:
         Fn::Sub: ${AWS::StackName}-placeindex
       PricingPlan: RequestBasedUsage
+
   GeocodeAddressLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -69,6 +73,7 @@ Resources:
         Variables:
           PLACE_INDEX:
             Ref: PlaceIndex
+
   GeocodeAddressLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -96,6 +101,106 @@ Resources:
                   - Fn::GetAtt: [PlaceIndex, IndexArn]
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  
+  GeocodeAddressRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      ApiKeySourceType: HEADER
+      Description: An API Gateway with a Lambda Integration
+      EndpointConfiguration:
+        Types:
+          - EDGE
+      Name: geocode-address-api
+
+  GeocodeAddressApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt GeocodeAddressRestApi.RootResourceId
+      PathPart: 'geocode'
+      RestApiId: !Ref GeocodeAddressRestApi
+
+  GeocodeAddressApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: GET
+      RequestParameters:
+        method.request.querystring.address_line: true
+        method.request.querystring.municipality_name: true
+        method.request.querystring.state_code: true
+        method.request.querystring.post_code: true
+        method.request.querystring.country_code: true
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels: { "application/json": "Empty" }
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt GeocodeAddressApiIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GeocodeAddressLambda.Arn}/invocations'
+        RequestTemplates:
+          "application/json": "{
+            #foreach($queryParam in $input.params().querystring.keySet())
+            \"$queryParam\": \"$util.escapeJavaScript($input.params().querystring.get($queryParam))\" #if($foreach.hasNext),#end
+            #end
+          }"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              "application/json": "$input.json('$.body')"
+      OperationName: 'geocode_address'
+      ResourceId: !Ref GeocodeAddressApiResource
+      RestApiId: !Ref GeocodeAddressRestApi
+  
+  GeocodeAddressApiModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: 'application/json'
+      RestApiId: !Ref GeocodeAddressRestApi
+      Schema: {}
+
+  GeocodeAddressApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref GeocodeAddressApiDeployment
+      Description: Lambda API Stage dev
+      RestApiId: !Ref GeocodeAddressRestApi
+      StageName: 'dev'
+  
+  GeocodeAddressApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: GeocodeAddressApiMethod
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId: !Ref GeocodeAddressRestApi
+  
+  GeocodeAddressApiIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'apigateway.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt GeocodeAddressLambda.Arn
+
 Outputs:
   GeocodeAddressLambda:
     Description: Lambda function name
